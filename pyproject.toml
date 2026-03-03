@@ -1,0 +1,81 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "onyx-send2boox"
+version = "1.0.0"
+description = "a CLI sync Onyx Boox e-ink devices via send2boox service"
+keywords = [
+  "boox",
+  "文石",
+  "send2boox",
+  "onyx-boox",
+  "ebook",
+  "e-ink",
+  "cli"
+]
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+  { name = "Jiyee Sheng" }
+]
+dependencies = [
+  "requests>=2.31",
+  "oss2>=2.16",
+  "tomli>=2.0; python_version < '3.11'",
+]
+
+[project.urls]
+Homepage = "https://github.com/jiyee/onyx-send2boox"
+Repository = "https://github.com/jiyee/onyx-send2boox"
+Issues = "https://github.com/jiyee/onyx-send2boox/issues"
+
+[project.optional-dependencies]
+debug = [
+  "playwright>=1.44",
+]
+dev = [
+  "mypy>=1.9",
+  "pytest>=8.0",
+  "responses>=0.25",
+  "ruff>=0.3",
+  "types-requests>=2.32",
+]
+
+[project.scripts]
+send2boox = "send2boox.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.mypy]
+python_version = "3.10"
+mypy_path = "src"
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_return_any = true
+check_untyped_defs = true
+disallow_incomplete_defs = true
+no_implicit_optional = true
+
+[[tool.mypy.overrides]]
+module = ["oss2", "oss2.*"]
+ignore_missing_imports = true
