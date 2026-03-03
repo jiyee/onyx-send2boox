@@ -74,6 +74,16 @@ send2boox book annotations 0138a37b2e77444b9995913cca6a6351 --output ./annotatio
 send2boox book bookmarks 0138a37b2e77444b9995913cca6a6351 --output ./bookmarks.json
 ```
 
+Export single-book annotations as Boox-style `Reading Notes` TXT:
+
+```bash
+send2boox book dump 0138a37b2e77444b9995913cca6a6351
+send2boox book dump 0138a37b2e77444b9995913cca6a6351 --author "Tianzhen Yang" --output ./reading-notes.txt
+```
+
+When `--author` is omitted, `book dump` automatically uses the `authors` field
+from library metadata (if available). Passing `--author` overrides that value.
+
 By default these commands return active records (`status == 0`). Pass
 `--include-inactive` to include deleted/archived history records.
 

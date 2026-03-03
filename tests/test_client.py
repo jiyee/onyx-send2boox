@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from send2boox.client import Send2BooxClient
+from send2boox.client import BookAnnotation, Send2BooxClient, format_book_annotations_dump
 from send2boox.config import AppConfig
 from send2boox.exceptions import ApiError, ResponseFormatError
 
@@ -260,6 +260,8 @@ def test_list_library_books_filters_mode_type_and_deduplicates() -> None:
                                 "modeType": 4,
                                 "uniqueId": "book-1",
                                 "name": "Alpha",
+                                "title": "Alpha T",
+                                "authors": "Author A",
                                 "status": 0,
                             }
                         },
@@ -274,6 +276,8 @@ def test_list_library_books_filters_mode_type_and_deduplicates() -> None:
                                 "modeType": 4,
                                 "uniqueId": "book-1",
                                 "name": "Alpha v2",
+                                "title": "Alpha T2",
+                                "authors": "Author A2",
                                 "status": 0,
                             }
                         },
@@ -299,6 +303,8 @@ def test_list_library_books_filters_mode_type_and_deduplicates() -> None:
 
     assert [item.unique_id for item in books] == ["book-1", "book-2"]
     assert books[0].name == "Alpha v2"
+    assert books[0].title == "Alpha T2"
+    assert books[0].authors == "Author A2"
     path_calls = [call for call in api.calls if call.get("path_request")]
     assert len(path_calls) == 3
     assert path_calls[0]["params"] == {
@@ -533,3 +539,44 @@ def test_list_book_bookmarks_filters_mode_type_document_and_status() -> None:
     assert bookmarks[0].page_number == 31
     assert bookmarks[0].position == "8888"
     assert bookmarks[0].status == 0
+
+
+def test_format_book_annotations_dump_matches_template() -> None:
+    annotations = [
+        BookAnnotation(
+            unique_id="ann-1",
+            document_id="book-1",
+            chapter="01 Chapter",
+            quote="Quote 1",
+            note="Note 1\n\nSSH",
+            page_number=12,
+            updated_at=None,
+        ),
+        BookAnnotation(
+            unique_id="ann-2",
+            document_id="book-1",
+            quote="Quote 2",
+            page_number=13,
+            updated_at=None,
+        ),
+    ]
+
+    dump = format_book_annotations_dump(
+        annotations=annotations,
+        book_title="Alpha",
+        book_author="Author A",
+    )
+
+    assert dump == (
+        "Reading Notes\xa0|\xa0<<Alpha>>Author A\n"
+        "01 Chapter\n"
+        "1970-01-01 00:00\xa0\xa0|\xa0\xa0Page No.: 13\n"
+        "Quote 1\n"
+        "【Annotation】Note 1\n"
+        "\n"
+        "SSH\n"
+        "-------------------\n"
+        "1970-01-01 00:00\xa0\xa0|\xa0\xa0Page No.: 14\n"
+        "Quote 2\n"
+        "-------------------\n"
+    )

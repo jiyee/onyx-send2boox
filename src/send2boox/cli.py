@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import re
 import sys
 import time
 from collections.abc import Sequence
@@ -13,6 +14,7 @@ from pathlib import Path
 from .client import (
     RemoteFile,
     Send2BooxClient,
+    format_book_annotations_dump,
     format_files_table,
     format_library_books_table,
 )
@@ -190,6 +192,35 @@ def build_parser() -> argparse.ArgumentParser:
     bookmarks_parser.add_argument(
         "--output",
         help="Optional path to write JSON bookmarks",
+    )
+
+    dump_parser = book_subparsers.add_parser(
+        "dump",
+        help="Export single-book annotations as Boox Reading Notes TXT",
+    )
+    dump_parser.set_defaults(command="book_dump")
+    dump_parser.add_argument("book_id", help="Book unique id (documentId)")
+    dump_parser.add_argument(
+        "--author",
+        default="",
+        help=(
+            "Optional author suffix for header: Reading Notes | <<title>>author. "
+            "If omitted, use library metadata authors when available."
+        ),
+    )
+    dump_parser.add_argument(
+        "--title",
+        default="",
+        help="Optional title override for header and auto output filename",
+    )
+    dump_parser.add_argument(
+        "--include-inactive",
+        action="store_true",
+        help="Include annotation records whose status is not 0",
+    )
+    dump_parser.add_argument(
+        "--output",
+        help="Optional output TXT path; default is <title>-annotation-YYYY-MM-DD_HH_MM_SS.txt",
     )
 
     debug_parser = subparsers.add_parser(
@@ -722,6 +753,81 @@ def main(argv: Sequence[str] | None = None) -> int:
                 _print_warn(f"failed on {preferred_cloud}; used {active_cloud} fallback.")
             return 0
 
+        if command == "book_dump":
+            normalized_book_id = args.book_id.strip()
+            if not normalized_book_id:
+                raise ConfigError("book_id is required.")
+
+            preferred_cloud = config.cloud.strip()
+            dump_hosts: list[str] = []
+            for host in [preferred_cloud, "send2boox.com", "eur.boox.com"]:
+                normalized = host.strip()
+                if normalized and normalized not in dump_hosts:
+                    dump_hosts.append(normalized)
+
+            annotations = None
+            active_cloud = preferred_cloud
+            dump_last_error: Send2BooxError | None = None
+            matched_book_name = ""
+            matched_book_author = ""
+
+            for host in dump_hosts:
+                active_client = client
+                if host != preferred_cloud:
+                    active_client = Send2BooxClient(
+                        AppConfig(
+                            email=config.email,
+                            token=config.token,
+                            cloud=host,
+                        )
+                    )
+                try:
+                    annotations = active_client.list_book_annotations(
+                        normalized_book_id,
+                        include_inactive=args.include_inactive,
+                    )
+                    active_cloud = host
+                    try:
+                        books = active_client.list_library_books(include_inactive=True)
+                    except Send2BooxError:
+                        books = []
+                    for item in books:
+                        if item.unique_id == normalized_book_id and item.name.strip():
+                            matched_book_name = item.name.strip()
+                            matched_book_author = item.authors.strip()
+                            break
+                    break
+                except Send2BooxError as exc:
+                    dump_last_error = exc
+
+            if annotations is None:
+                if dump_last_error is not None:
+                    raise dump_last_error
+                raise Send2BooxError("Failed to fetch annotations for dump.")
+
+            explicit_title = (args.title or "").strip()
+            inferred_title = _strip_known_book_extension(matched_book_name)
+            dump_title = explicit_title or inferred_title or normalized_book_id
+            dump_author = (args.author or "").strip() or matched_book_author
+            dump_text = format_book_annotations_dump(
+                annotations=annotations,
+                book_title=dump_title,
+                book_author=dump_author,
+            )
+
+            output_path = (
+                Path(args.output)
+                if args.output
+                else _build_default_annotation_dump_path(book_title=dump_title)
+            )
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(dump_text, encoding="utf-8")
+            _print_ok(f"Annotation dump written to {output_path}")
+
+            if active_cloud != preferred_cloud:
+                _print_warn(f"failed on {preferred_cloud}; used {active_cloud} fallback.")
+            return 0
+
         if command == "file_delete":
             target_ids = [item.strip() for item in args.ids if item.strip()]
             client.delete_files(target_ids)
@@ -760,6 +866,46 @@ def _find_remaining_target_ids(*, files: list[RemoteFile], target_ids: list[str]
     remaining = [item.file_id for item in files if item.file_id in target_set]
     remaining.sort()
     return remaining
+
+
+def _build_default_annotation_dump_path(*, book_title: str) -> Path:
+    timestamp = time.strftime("%Y-%m-%d_%H_%M_%S")
+    normalized_title = _sanitize_filename_component(book_title)
+    return Path(f"{normalized_title}-annotation-{timestamp}.txt")
+
+
+def _sanitize_filename_component(value: str) -> str:
+    normalized = value.strip() or "book"
+    sanitized = re.sub(r'[<>:\"/\\\\|?*\\x00-\\x1f]', "_", normalized)
+    return sanitized or "book"
+
+
+def _strip_known_book_extension(value: str) -> str:
+    normalized = value.strip()
+    if not normalized:
+        return ""
+    match = re.match(r"^(?P<base>.+?)(?P<ext>\.[A-Za-z0-9]{2,8})$", normalized)
+    if match is None:
+        return normalized
+    ext = match.group("ext").lower()
+    if ext in {
+        ".epub",
+        ".pdf",
+        ".mobi",
+        ".azw",
+        ".azw3",
+        ".txt",
+        ".doc",
+        ".docx",
+        ".fb2",
+        ".rtf",
+        ".djvu",
+        ".djv",
+        ".cbz",
+        ".cbr",
+    }:
+        return match.group("base")
+    return normalized
 
 
 if __name__ == "__main__":

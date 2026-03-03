@@ -72,6 +72,16 @@ send2boox book annotations 0138a37b2e77444b9995913cca6a6351 --output ./annotatio
 send2boox book bookmarks 0138a37b2e77444b9995913cca6a6351 --output ./bookmarks.json
 ```
 
+按 Boox 的 `Reading Notes` 模板导出单本书划线为 TXT：
+
+```bash
+send2boox book dump 0138a37b2e77444b9995913cca6a6351
+send2boox book dump 0138a37b2e77444b9995913cca6a6351 --author "杨天真" --output ./reading-notes.txt
+```
+
+当不传 `--author` 时，`book dump` 会优先使用书库元数据中的 `authors`
+字段（如果存在）；传入 `--author` 则会覆盖该值。
+
 以上命令默认返回有效记录（`status == 0`）。传入 `--include-inactive` 可包含
 已删除/归档的历史记录。
 

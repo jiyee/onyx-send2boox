@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import os
+import re
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Protocol, TypeVar
 
@@ -38,6 +40,8 @@ class LibraryBook:
 
     unique_id: str
     name: str
+    title: str = ""
+    authors: str = ""
     status: int | None = 0
     reading_status: int | None = None
 
@@ -218,9 +222,19 @@ class Send2BooxClient:
             if not isinstance(name, str):
                 name = ""
 
+            title = doc.get("title")
+            if not isinstance(title, str):
+                title = ""
+
+            authors = doc.get("authors")
+            if not isinstance(authors, str):
+                authors = ""
+
             books_by_id[unique_id] = LibraryBook(
                 unique_id=unique_id,
                 name=name,
+                title=title,
+                authors=authors,
                 status=status,
                 reading_status=_as_int(doc.get("readingStatus")),
             )
@@ -522,6 +536,31 @@ def format_library_books_table(books: list[LibraryBook]) -> str:
     return "\n".join(lines)
 
 
+def format_book_annotations_dump(
+    *,
+    annotations: list[BookAnnotation],
+    book_title: str,
+    book_author: str = "",
+) -> str:
+    """Format annotations into Boox Reading Notes text template."""
+
+    normalized_title = book_title.strip() or "Unknown Book"
+    normalized_author = book_author.strip()
+    lines = [f"Reading Notes\xa0|\xa0<<{normalized_title}>>{normalized_author}"]
+
+    for item in sorted(annotations, key=_annotation_dump_sort_key):
+        _append_multiline_text(lines, item.chapter)
+        lines.append(
+            f"{_format_annotation_dump_timestamp(item.updated_at)}\xa0\xa0|\xa0\xa0"
+            f"Page No.: {_format_dump_page(item.page_number)}"
+        )
+        _append_multiline_text(lines, item.quote)
+        _append_annotation_note(lines, item.note)
+        lines.append("-------------------")
+
+    return "\n".join(lines) + "\n"
+
+
 def _extract_nested(
     payload: dict[str, Any],
     path: tuple[str, ...],
@@ -620,3 +659,67 @@ def _keep_latest_by_updated_at(
     item_ts = updated_at if isinstance(updated_at, int) else -1
     if item_ts >= existing_ts:
         item_by_id[item.unique_id] = item
+
+
+def _annotation_dump_sort_key(item: BookAnnotation) -> tuple[int, int, int, str]:
+    page = item.page_number if isinstance(item.page_number, int) else 2**31 - 1
+    position = _resolve_annotation_order_position(item=item)
+    updated_at = _normalize_dump_timestamp_seconds(item.updated_at) or 0
+    return (page, position, updated_at, item.unique_id)
+
+
+def _resolve_annotation_order_position(*, item: BookAnnotation) -> int:
+    for candidate in [item.start_position, item.position, item.end_position]:
+        parsed = _extract_first_integer(candidate)
+        if parsed is not None:
+            return parsed
+    return 2**31 - 1
+
+
+def _extract_first_integer(value: str | None) -> int | None:
+    if not isinstance(value, str):
+        return None
+    match = re.search(r"-?\d+", value)
+    if match is None:
+        return None
+    try:
+        return int(match.group(0))
+    except ValueError:
+        return None
+
+
+def _normalize_dump_timestamp_seconds(value: int | None) -> int | None:
+    if not isinstance(value, int):
+        return None
+    if value > 10_000_000_000:
+        return value // 1000
+    return value
+
+
+def _format_annotation_dump_timestamp(value: int | None) -> str:
+    seconds = _normalize_dump_timestamp_seconds(value)
+    if seconds is None:
+        return "1970-01-01 00:00"
+    try:
+        return datetime.fromtimestamp(seconds).strftime("%Y-%m-%d %H:%M")
+    except (OSError, OverflowError, ValueError):  # pragma: no cover - platform-specific bounds
+        return "1970-01-01 00:00"
+
+
+def _format_dump_page(value: int | None) -> str:
+    if isinstance(value, int):
+        return str(value + 1)
+    return ""
+
+
+def _append_multiline_text(lines: list[str], value: str) -> None:
+    for line in value.splitlines():
+        lines.append(line.rstrip("\r"))
+
+
+def _append_annotation_note(lines: list[str], value: str) -> None:
+    note_lines = [line.rstrip("\r") for line in value.splitlines()]
+    if not note_lines:
+        return
+    lines.append(f"【Annotation】{note_lines[0]}")
+    lines.extend(note_lines[1:])

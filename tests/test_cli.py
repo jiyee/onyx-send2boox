@@ -75,6 +75,8 @@ class DummyBook:
     name: str
     status: int | None = 0
     reading_status: int | None = 0
+    title: str = ""
+    authors: str = ""
 
 
 @dataclass
@@ -670,6 +672,182 @@ def test_read_bookmarks_outputs_json_and_writes_file(
         }
     ]
     assert json.loads(output_path.read_text()) == payload
+
+
+def test_book_dump_outputs_annotation_txt_template(
+    monkeypatch,
+    tmp_path: Path,
+    capsys,
+) -> None:
+    output_path = tmp_path / "book-annotations.txt"
+
+    class CapturingClient(DummyClient):
+        def list_library_books(self, *, include_inactive: bool = False) -> list[DummyBook]:
+            _ = include_inactive
+            return [DummyBook(unique_id="book-1", name="Alpha")]
+
+        def list_book_annotations(
+            self,
+            book_id: str,
+            *,
+            include_inactive: bool = False,
+        ) -> list[DummyAnnotation]:
+            _ = include_inactive
+            return [
+                DummyAnnotation(
+                    unique_id="ann-1",
+                    document_id=book_id,
+                    chapter="01 Chapter",
+                    quote="Quote 1",
+                    note="Note 1",
+                    page_number=12,
+                    updated_at=None,
+                ),
+                DummyAnnotation(
+                    unique_id="ann-2",
+                    document_id=book_id,
+                    quote="Quote 2",
+                    page_number=13,
+                    updated_at=None,
+                ),
+            ]
+
+    monkeypatch.setattr(
+        "send2boox.cli.load_config",
+        lambda _: AppConfig(email="user@example.com", token="tkn", cloud="send2boox.com"),
+    )
+    monkeypatch.setattr("send2boox.cli.Send2BooxClient", CapturingClient)
+
+    rc = main(
+        [
+            "book",
+            "dump",
+            "book-1",
+            "--author",
+            "Author A",
+            "--output",
+            str(output_path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert captured.out == ""
+    assert "[OK] Annotation dump written to" in captured.err
+    expected = (
+        "Reading Notes\xa0|\xa0<<Alpha>>Author A\n"
+        "01 Chapter\n"
+        "1970-01-01 00:00\xa0\xa0|\xa0\xa0Page No.: 13\n"
+        "Quote 1\n"
+        "【Annotation】Note 1\n"
+        "-------------------\n"
+        "1970-01-01 00:00\xa0\xa0|\xa0\xa0Page No.: 14\n"
+        "Quote 2\n"
+        "-------------------\n"
+    )
+    assert output_path.read_text(encoding="utf-8") == expected
+
+
+def test_book_dump_strips_known_extension_from_inferred_title(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "book-annotations.txt"
+
+    class CapturingClient(DummyClient):
+        def list_library_books(self, *, include_inactive: bool = False) -> list[DummyBook]:
+            _ = include_inactive
+            return [DummyBook(unique_id="book-1", name="Alpha.epub")]
+
+        def list_book_annotations(
+            self,
+            book_id: str,
+            *,
+            include_inactive: bool = False,
+        ) -> list[DummyAnnotation]:
+            _ = include_inactive
+            return [
+                DummyAnnotation(
+                    unique_id="ann-1",
+                    document_id=book_id,
+                    quote="Quote 1",
+                    page_number=0,
+                    updated_at=None,
+                )
+            ]
+
+    monkeypatch.setattr(
+        "send2boox.cli.load_config",
+        lambda _: AppConfig(email="user@example.com", token="tkn", cloud="send2boox.com"),
+    )
+    monkeypatch.setattr("send2boox.cli.Send2BooxClient", CapturingClient)
+
+    rc = main(
+        [
+            "book",
+            "dump",
+            "book-1",
+            "--author",
+            "Author A",
+            "--output",
+            str(output_path),
+        ]
+    )
+
+    assert rc == 0
+    assert output_path.read_text(encoding="utf-8").startswith(
+        "Reading Notes\xa0|\xa0<<Alpha>>Author A\n"
+    )
+
+
+def test_book_dump_uses_book_author_when_author_arg_missing(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "book-annotations.txt"
+
+    class CapturingClient(DummyClient):
+        def list_library_books(self, *, include_inactive: bool = False) -> list[DummyBook]:
+            _ = include_inactive
+            return [DummyBook(unique_id="book-1", name="Alpha", authors="Author A")]
+
+        def list_book_annotations(
+            self,
+            book_id: str,
+            *,
+            include_inactive: bool = False,
+        ) -> list[DummyAnnotation]:
+            _ = include_inactive
+            return [
+                DummyAnnotation(
+                    unique_id="ann-1",
+                    document_id=book_id,
+                    quote="Quote 1",
+                    page_number=0,
+                    updated_at=None,
+                )
+            ]
+
+    monkeypatch.setattr(
+        "send2boox.cli.load_config",
+        lambda _: AppConfig(email="user@example.com", token="tkn", cloud="send2boox.com"),
+    )
+    monkeypatch.setattr("send2boox.cli.Send2BooxClient", CapturingClient)
+
+    rc = main(
+        [
+            "book",
+            "dump",
+            "book-1",
+            "--output",
+            str(output_path),
+        ]
+    )
+
+    assert rc == 0
+    assert output_path.read_text(encoding="utf-8").startswith(
+        "Reading Notes\xa0|\xa0<<Alpha>>Author A\n"
+    )
 
 
 def test_read_bookmarks_falls_back_to_eur_when_primary_unauthorized(
